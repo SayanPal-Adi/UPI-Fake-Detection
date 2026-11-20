@@ -1,5 +1,6 @@
 
 import re
+from decimal import Decimal, InvalidOperation
 
 
 class AnomalyDetector:
@@ -43,14 +44,21 @@ class AnomalyDetector:
 
     @staticmethod
     def parse_amount(amount):
+
         if not amount:
             return None
 
-        cleaned = re.sub(r"[^0-9.]", "", amount)
+        cleaned = re.sub(r"[^0-9.]", "", str(amount))
 
         try:
-            return float(cleaned)
-        except ValueError:
+            value = Decimal(cleaned)
+
+            if not value.is_finite() or value <= 0:
+                return None
+
+            return value
+
+        except (InvalidOperation, ValueError):
             return None
 
     @staticmethod
@@ -63,6 +71,9 @@ class AnomalyDetector:
             r"[a-zA-Z]+",
             words.lower()
         )
+
+        if not tokens:
+            return None
 
         total = 0
         current = 0
@@ -84,54 +95,64 @@ class AnomalyDetector:
             else:
                 current += value
 
-        return float(total + current)
+        return Decimal(total + current)
 
     @staticmethod
     def analyze(app_result, transaction_details):
 
         signals = []
 
-        # 1. Check application identification
+        # 1. UPI application identification
         if app_result.get("app") == "Unknown":
             signals.append({
                 "code": "UNKNOWN_APP",
                 "severity": "review",
-                "message": "UPI application could not be identified."
+                "message": (
+                    "UPI application could not be identified."
+                )
             })
 
-        # 2. Check transaction ID
+        # 2. Transaction ID
         if not transaction_details.get("transaction_id"):
             signals.append({
                 "code": "MISSING_TRANSACTION_ID",
                 "severity": "review",
-                "message": "Transaction reference ID was not detected."
+                "message": (
+                    "Transaction reference ID was not detected."
+                )
             })
 
-        # 3. Check amount
+        # 3. Numeric amount
         if not transaction_details.get("amount"):
             signals.append({
                 "code": "MISSING_AMOUNT",
                 "severity": "review",
-                "message": "Payment amount could not be extracted."
+                "message": (
+                    "Payment amount could not be extracted."
+                )
             })
 
-        # 4. Check date
+        # 4. Date
         if not transaction_details.get("date"):
             signals.append({
                 "code": "MISSING_DATE",
                 "severity": "review",
-                "message": "Transaction date was not detected."
+                "message": (
+                    "Transaction date was not detected."
+                )
             })
 
-        # 5. Check time
+        # 5. Time
         if not transaction_details.get("time"):
             signals.append({
                 "code": "MISSING_TIME",
                 "severity": "review",
-                "message": "Transaction time was not detected."
+                "message": (
+                    "Transaction time was not detected."
+                )
             })
 
-        # 6. Check payment status
+        # 6. Payment status
         status = transaction_details.get(
             "payment_status", "Unknown"
         )
@@ -140,21 +161,27 @@ class AnomalyDetector:
             signals.append({
                 "code": "PAYMENT_FAILED",
                 "severity": "review",
-                "message": "The screenshot indicates a failed payment."
+                "message": (
+                    "The screenshot indicates a failed payment."
+                )
             })
 
         elif status == "Pending":
             signals.append({
                 "code": "PAYMENT_PENDING",
                 "severity": "review",
-                "message": "The screenshot indicates a pending payment."
+                "message": (
+                    "The screenshot indicates a pending payment."
+                )
             })
 
         elif status == "Unknown":
             signals.append({
                 "code": "UNKNOWN_PAYMENT_STATUS",
                 "severity": "review",
-                "message": "Payment status could not be identified."
+                "message": (
+                    "Payment status could not be identified."
+                )
             })
 
         # 7. Compare numeric amount with amount in words
@@ -171,15 +198,17 @@ class AnomalyDetector:
             and written_amount is not None
             and numeric_amount != written_amount
         ):
+
             signals.append({
                 "code": "AMOUNT_MISMATCH",
-                "severity": "high",
+                "severity": "review",
                 "message": (
-                    "Numeric amount does not match the amount "
-                    "written in words."
+                    "The numeric amount does not match "
+                    "the amount written in words. "
+                    "OCR error or possible alteration requires review."
                 ),
-                "numeric_amount": numeric_amount,
-                "written_amount": written_amount
+                "numeric_amount": float(numeric_amount),
+                "written_amount": float(written_amount)
             })
 
         # 8. Generate preliminary verdict
@@ -190,17 +219,21 @@ class AnomalyDetector:
 
         if high_signals:
             verdict = "Suspicious"
-        elif signals:
-            verdict = "Review required"
-        else:
-            verdict = "No obvious OCR-level issues detected"
 
+        elif signals:
+            verdict = "Review Required"
+
+        else:
+            verdict = "Low Risk"
+
+        # 9. Final assessment
         return {
             "verdict": verdict,
             "signal_count": len(signals),
             "signals": signals,
             "assessment_note": (
                 "This assessment uses screenshot-derived signals only. "
-                "It does not verify whether money was received."
+                "It does not verify whether money was received. "
+                "OCR discrepancies may require manual review."
             )
         }
