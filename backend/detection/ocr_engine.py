@@ -1,15 +1,12 @@
 
-import pytesseract
 import re
+import pytesseract
 
 
 class OCREngine:
 
     @staticmethod
     def extract_text(image):
-        """
-        Extract text from a preprocessed image.
-        """
 
         config = "--oem 3 --psm 6"
 
@@ -18,35 +15,71 @@ class OCREngine:
             config=config
         )
 
-        return text
+        return text.strip()
 
     @staticmethod
     def extract_details(text):
 
         details = {
             "amount": None,
+            "amount_words": None,
             "upi_id": None,
             "transaction_id": None,
-            "payment_status": None,
+            "payment_status": "Unknown",
             "date": None,
             "time": None
         }
 
-        # Extract amount
-        amount_pattern = (
-            r'(?:₹|Rs\.?|INR)\s*[\d,]+(?:\.\d{1,2})?'
+        # --------------------------------
+        # 1. AMOUNT EXTRACTION
+        # --------------------------------
+
+        amount_patterns = [
+            r'(?:₹|Rs\.?|INR|=)\s*[\d,]+(?:\.\d{1,2})?',
+            r'\b\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?\b'
+        ]
+
+        for pattern in amount_patterns:
+
+            match = re.search(
+                pattern,
+                text,
+                re.IGNORECASE
+            )
+
+            if match:
+                details["amount"] = match.group().strip()
+
+                if details["amount"].startswith("="):
+                    details["amount"] = (
+                        "₹" + details["amount"][1:].strip()
+                    )
+
+                break
+
+        # --------------------------------
+        # 2. AMOUNT IN WORDS
+        # --------------------------------
+
+        words_pattern = (
+            r'Rupees\s+(.+?)\s+Only'
         )
 
-        amount = re.search(
-            amount_pattern,
+        words_match = re.search(
+            words_pattern,
             text,
             re.IGNORECASE
         )
 
-        if amount:
-            details["amount"] = amount.group()
+        if words_match:
+            details["amount_words"] = (
+                words_match.group(1).strip()
+            )
 
-        # Extract UPI ID
+        # --------------------------------
+        # 3. UPI ID
+        # --------------------------------
+
         upi_pattern = (
             r'\b[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\b'
         )
@@ -56,10 +89,14 @@ class OCREngine:
         if upi:
             details["upi_id"] = upi.group()
 
-        # Extract transaction ID
+        # --------------------------------
+        # 4. TRANSACTION ID
+        # --------------------------------
+
         transaction_pattern = (
-            r'(?:transaction\s*id|txn\s*id|'
-            r'upi\s*ref(?:erence)?\s*(?:no|number)?)'
+            r'(?:UPI\s*)?'
+            r'(?:Ref(?:erence)?\s*(?:ID|No\.?)|'
+            r'Transaction\s*ID|Txn\s*ID)'
             r'\s*[:#-]?\s*([A-Z0-9]{8,30})'
         )
 
@@ -74,34 +111,62 @@ class OCREngine:
                 transaction.group(1)
             )
 
-        # Identify payment status
+        # --------------------------------
+        # 5. PAYMENT STATUS
+        # --------------------------------
+
         lower_text = text.lower()
 
-        if "payment successful" in lower_text:
+        if re.search(
+            r'\b(?:payment|transaction)\s+successful\b'
+            r'|\bsuccessfully\s+paid\b'
+            r'|\bpaid\s+successfully\b',
+            lower_text
+        ):
             details["payment_status"] = "Successful"
 
-        elif "successful" in lower_text:
-            details["payment_status"] = "Possible success"
-
-        elif "failed" in lower_text:
+        elif re.search(
+            r'\b(?:payment|transaction)\s+failed\b',
+            lower_text
+        ):
             details["payment_status"] = "Failed"
 
-        elif "pending" in lower_text:
+        elif re.search(
+            r'\b(?:payment|transaction)\s+pending\b',
+            lower_text
+        ):
             details["payment_status"] = "Pending"
 
-        # Extract date
+        # --------------------------------
+        # 6. DATE
+        # --------------------------------
+
         date_pattern = (
+            r'\b\d{1,2}\s+'
+            r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)'
+            r'[a-z]*'
+            r'(?!\w)'
+            r'|'
             r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b'
         )
 
-        date = re.search(date_pattern, text)
+        date = re.search(
+            date_pattern,
+            text,
+            re.IGNORECASE
+        )
 
         if date:
-            details["date"] = date.group()
+            details["date"] = date.group().strip()
 
-        # Extract time
+        # --------------------------------
+        # 7. TIME
+        # --------------------------------
+
         time_pattern = (
-            r'\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\b'
+            r'\b\d{1,2}:\d{2}'
+            r'(?::\d{2})?'
+            r'\s*(?:AM|PM)\b'
         )
 
         time = re.search(
@@ -111,6 +176,6 @@ class OCREngine:
         )
 
         if time:
-            details["time"] = time.group()
+            details["time"] = time.group().strip()
 
         return details
