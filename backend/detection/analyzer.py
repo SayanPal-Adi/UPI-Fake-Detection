@@ -6,6 +6,7 @@ from detection.ocr_engine import OCREngine
 from detection.app_identifier import UPIAppIdentifier
 from detection.anomaly_detector import AnomalyDetector
 from detection.ela_detector import ELADetector
+from detection.pixel_analyzer import PixelAnalyzer
 
 
 class UPIAnalyzer:
@@ -42,13 +43,16 @@ class UPIAnalyzer:
         # STEP 6: Error Level Analysis
         ela_result = ELADetector.analyze(image_path)
 
-        # STEP 7: Calculate processing time
+        # STEP 7: Pixel and edge analysis
+        pixel_result = PixelAnalyzer.analyze(image_path)
+
+        # STEP 8: Processing time
         processing_time = round(
             (time.perf_counter() - start_time) * 1000,
             2
         )
 
-        # STEP 8: Prepare final result
+        # STEP 9: Final result
         result = {
             "project": "UPI Shield",
             "status": "Analysis completed",
@@ -60,6 +64,8 @@ class UPIAnalyzer:
             "fraud_analysis": anomaly_result,
 
             "ela_analysis": ela_result,
+
+            "pixel_analysis": pixel_result,
 
             "image_information": {
                 "width": image_data["width"],
