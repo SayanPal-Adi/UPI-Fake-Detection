@@ -7,6 +7,8 @@ from detection.app_identifier import UPIAppIdentifier
 from detection.anomaly_detector import AnomalyDetector
 from detection.ela_detector import ELADetector
 from detection.pixel_analyzer import PixelAnalyzer
+from detection.reference_matcher import ReferenceMatcher
+from detection.region_matcher import RegionMatcher
 
 
 class UPIAnalyzer:
@@ -19,7 +21,7 @@ class UPIAnalyzer:
         # STEP 1: Image preprocessing
         image_data = ImagePreprocessor.preprocess(image_path)
 
-        # STEP 2: OCR text extraction
+        # STEP 2: OCR extraction
         extracted_text = OCREngine.extract_text(
             image_data["enhanced"]
         )
@@ -43,16 +45,26 @@ class UPIAnalyzer:
         # STEP 6: Error Level Analysis
         ela_result = ELADetector.analyze(image_path)
 
-        # STEP 7: Pixel and edge analysis
+        # STEP 7: Pixel analysis
         pixel_result = PixelAnalyzer.analyze(image_path)
 
-        # STEP 8: Processing time
+        # STEP 8: Whole-image reference comparison
+        reference_result = ReferenceMatcher.analyze(
+            image_path
+        )
+
+        # STEP 9: Region-based comparison
+        region_result = RegionMatcher.analyze(
+            image_path
+        )
+
+        # STEP 10: Processing time
         processing_time = round(
             (time.perf_counter() - start_time) * 1000,
             2
         )
 
-        # STEP 9: Final result
+        # STEP 11: Final response
         result = {
             "project": "UPI Shield",
             "status": "Analysis completed",
@@ -66,6 +78,10 @@ class UPIAnalyzer:
             "ela_analysis": ela_result,
 
             "pixel_analysis": pixel_result,
+
+            "reference_analysis": reference_result,
+
+            "region_analysis": region_result,
 
             "image_information": {
                 "width": image_data["width"],
