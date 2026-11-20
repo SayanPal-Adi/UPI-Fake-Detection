@@ -1,3 +1,4 @@
+
 import os
 import cv2
 import numpy as np
@@ -17,11 +18,21 @@ class ReferenceMatcher:
     )
 
     TARGET_SIZE = (256, 512)
-    TOP_MATCHES = 3
 
     SUPPORTED_EXTENSIONS = {
         ".jpg", ".jpeg", ".png"
     }
+
+    APPS = [
+        "google_pay",
+        "phonepe",
+        "paytm"
+    ]
+
+    CATEGORIES = [
+        "genuine",
+        "manipulated"
+    ]
 
     @staticmethod
     def prepare_image(image):
@@ -70,31 +81,66 @@ class ReferenceMatcher:
         return canvas
 
     @staticmethod
-    def get_similarity(image1, image2):
+    def extract_features(image):
 
-        return structural_similarity(
-            image1,
-            image2,
+        # Structural similarity representation
+        gray = image
+
+        # Edge representation
+        edges = cv2.Canny(
+            gray,
+            60,
+            150
+        )
+
+        return {
+            "gray": gray,
+            "edges": edges
+        }
+
+    @staticmethod
+    def compare_features(upload_features, reference_features):
+
+        ssim_score = structural_similarity(
+            upload_features["gray"],
+            reference_features["gray"],
             data_range=255
         )
+
+        edge_score = structural_similarity(
+            upload_features["edges"],
+            reference_features["edges"],
+            data_range=255
+        )
+
+        combined_score = (
+            0.65 * ssim_score +
+            0.35 * edge_score
+        )
+
+        return {
+            "ssim": round(
+                max(0, ssim_score) * 100,
+                2
+            ),
+            "edge_similarity": round(
+                max(0, edge_score) * 100,
+                2
+            ),
+            "combined_similarity": round(
+                max(0, combined_score) * 100,
+                2
+            )
+        }
 
     @staticmethod
     def load_references():
 
         references = []
 
-        applications = [
-            "google_pay",
-            "phonepe",
-            "paytm"
-        ]
+        for app in ReferenceMatcher.APPS:
 
-        for app in applications:
-
-            for category in [
-                "genuine",
-                "manipulated"
-            ]:
+            for category in ReferenceMatcher.CATEGORIES:
 
                 folder = os.path.join(
                     ReferenceMatcher.REFERENCE_DIR,
@@ -126,12 +172,16 @@ class ReferenceMatcher:
                     if image is None:
                         continue
 
+                    prepared = ReferenceMatcher.prepare_image(
+                        image
+                    )
+
                     references.append({
                         "app": app,
                         "category": category,
                         "filename": filename,
-                        "image": ReferenceMatcher.prepare_image(
-                            image
+                        "features": ReferenceMatcher.extract_features(
+                            prepared
                         )
                     })
 
@@ -151,6 +201,10 @@ class ReferenceMatcher:
             uploaded_image
         )
 
+        upload_features = ReferenceMatcher.extract_features(
+            prepared_upload
+        )
+
         references = ReferenceMatcher.load_references()
 
         if not references:
@@ -162,91 +216,70 @@ class ReferenceMatcher:
 
         for reference in references:
 
-            similarity = ReferenceMatcher.get_similarity(
-                prepared_upload,
-                reference["image"]
+            comparison = ReferenceMatcher.compare_features(
+                upload_features,
+                reference["features"]
             )
 
             matches.append({
                 "app": reference["app"],
                 "category": reference["category"],
                 "filename": reference["filename"],
-                "similarity_percent": round(
-                    max(0, similarity) * 100,
-                    2
-                )
+                **comparison
             })
 
         matches.sort(
-            key=lambda item: item["similarity_percent"],
+            key=lambda item: item["combined_similarity"],
             reverse=True
         )
 
-        # Group results by application and category
         grouped_results = {}
 
-        for app in [
-            "google_pay",
-            "phonepe",
-            "paytm"
-        ]:
+        for app in ReferenceMatcher.APPS:
 
             grouped_results[app] = {}
 
-            for category in [
-                "genuine",
-                "manipulated"
-            ]:
+            for category in ReferenceMatcher.CATEGORIES:
 
                 category_matches = [
-                    match for match in matches
-                    if match["app"] == app
-                    and match["category"] == category
+                    item for item in matches
+                    if item["app"] == app
+                    and item["category"] == category
                 ]
 
                 category_matches.sort(
-                    key=lambda item: item["similarity_percent"],
+                    key=lambda item: item["combined_similarity"],
                     reverse=True
                 )
 
-                top_matches = category_matches[
-                    :ReferenceMatcher.TOP_MATCHES
-                ]
+                top_matches = category_matches[:3]
 
                 average_score = (
-                    sum(
-                        item["similarity_percent"]
+                    np.mean([
+                        item["combined_similarity"]
                         for item in top_matches
-                    ) / len(top_matches)
+                    ])
                     if top_matches else None
                 )
 
                 grouped_results[app][category] = {
                     "average_top_similarity": (
-                        round(average_score, 2)
+                        round(float(average_score), 2)
                         if average_score is not None
                         else None
                     ),
                     "top_matches": top_matches
                 }
 
-        # Find the application with the strongest
-        # overall visual similarity
         app_scores = {}
 
         for app, categories in grouped_results.items():
 
             scores = [
-                categories[category][
-                    "average_top_similarity"
-                ]
-                for category in [
-                    "genuine",
-                    "manipulated"
-                ]
-                if categories[category][
-                    "average_top_similarity"
-                ] is not None
+                categories[category]["average_top_similarity"]
+                for category in ReferenceMatcher.CATEGORIES
+                if categories[category]["average_top_similarity"]
+                is not None
             ]
 
             if scores:
@@ -261,15 +294,15 @@ class ReferenceMatcher:
         )
 
         return {
-            "method": "SSIM Reference Comparison",
+            "method": "SSIM and Edge Similarity",
             "references_compared": len(references),
             "likely_app_by_visual_similarity": likely_app,
             "app_similarity_scores": app_scores,
             "category_comparisons": grouped_results,
             "overall_top_matches": matches[:5],
             "assessment_note": (
-                "Similarity scores indicate visual resemblance "
-                "to stored examples. They do not establish "
-                "authenticity or prove manipulation."
+                "Visual similarity is not proof of authenticity "
+                "or manipulation. Results require validation "
+                "using independent test images."
             )
         }
