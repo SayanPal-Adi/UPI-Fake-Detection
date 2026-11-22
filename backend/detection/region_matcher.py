@@ -172,7 +172,6 @@ class RegionMatcher:
                 ),
                 "region_scores": region_scores
             })
-
         matches.sort(
             key=lambda item: item["overall_similarity"],
             reverse=True
