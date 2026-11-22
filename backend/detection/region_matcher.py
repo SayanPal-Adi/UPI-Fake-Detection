@@ -211,7 +211,6 @@ class RegionMatcher:
                     ),
                     "top_matches": top_matches
                 }
-
         return {
             "method": "Region-based SSIM and Edge Comparison",
             "references_compared": len(references),
