@@ -96,10 +96,7 @@ class OCREngine:
             if details["amount"]:
                 break
 
-        # Second preference: standalone comma-grouped amount.
-        # Example: 250,000 @
-        # This does not accept ordinary ungrouped numbers,
-        # reducing the chance of selecting a transaction ID.
+        
         if not details["amount"]:
 
             grouped_pattern = (
