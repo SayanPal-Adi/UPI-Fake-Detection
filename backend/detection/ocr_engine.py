@@ -8,7 +8,6 @@ class OCREngine:
     @staticmethod
     def extract_text(image):
 
-        # OCR configuration
         config = "--oem 3 --psm 6"
 
         text = pytesseract.image_to_string(
@@ -36,8 +35,6 @@ class OCREngine:
 
         # Normalize OCR text
         text = text.replace("\u00a0", " ")
-        text = text.replace("₹", "₹")
-
         lines = [
             line.strip()
             for line in text.splitlines()
@@ -48,38 +45,37 @@ class OCREngine:
         # 1. AMOUNT EXTRACTION
         # --------------------------------
 
-        amount_patterns = [
-
-            # Currency symbol: ₹500 or ₹ 500
-            r'(?:₹)\s*([0-9][0-9,]*(?:\.\d{1,2})?)',
-
-            # INR 500, Rs. 500, Rs 500
-            r'\b(?:INR|Rs\.?)\s*([0-9][0-9,]*(?:\.\d{1,2})?)',
-
-            # Amount labels: Amount: 500, You paid 500
-            r'\b(?:amount|you\s+paid|paid|total|sent)'
-            r'\s*(?:is|of|:|-)?\s*'
-            r'(?:₹|INR|Rs\.?)?\s*'
-            r'([0-9][0-9,]*(?:\.\d{1,2})?)',
-
-        ]
-
         def valid_amount(value):
 
             try:
                 cleaned = value.replace(",", "")
                 number = float(cleaned)
 
-                # Reject zero, negative and implausibly large values
-                if number <= 0 or number > 100000000:
-                    return False
-
-                return True
+                return (
+                    0 < number <= 100000000
+                )
 
             except (ValueError, TypeError):
                 return False
 
-        for pattern in amount_patterns:
+        # First preference: explicit currency or amount labels
+        explicit_patterns = [
+
+            # ₹500, ₹ 500
+            r'₹\s*([0-9][0-9,]*(?:\.\d{1,2})?)',
+
+            # Rs. 500, INR 500
+            r'\b(?:INR|Rs\.?)\s*'
+            r'([0-9][0-9,]*(?:\.\d{1,2})?)',
+
+            # Amount: 500, You paid 500
+            r'\b(?:amount|you\s+paid|paid|total|sent)'
+            r'\s*(?:is|of|:|-)?\s*'
+            r'(?:₹|INR|Rs\.?)?\s*'
+            r'([0-9][0-9,]*(?:\.\d{1,2})?)'
+        ]
+
+        for pattern in explicit_patterns:
 
             for line in lines:
 
@@ -94,20 +90,47 @@ class OCREngine:
                     candidate = match.group(1).strip()
 
                     if valid_amount(candidate):
-
                         details["amount"] = "₹" + candidate
                         break
 
             if details["amount"]:
                 break
 
+        # Second preference: standalone comma-grouped amount.
+        # Example: 250,000 @
+        # This does not accept ordinary ungrouped numbers,
+        # reducing the chance of selecting a transaction ID.
+        if not details["amount"]:
+
+            grouped_pattern = (
+                r'(?<![\w/])'
+                r'(\d{1,3}(?:,\d{3})+)'
+                r'(?:\.\d{1,2})?'
+                r'(?![\w/])'
+            )
+
+            for line in lines:
+
+                match = re.search(
+                    grouped_pattern,
+                    line
+                )
+
+                if match:
+
+                    candidate = match.group(0).strip()
+
+                    if valid_amount(candidate):
+
+                        details["amount"] = "₹" + candidate
+                        break
+
         # --------------------------------
         # 2. AMOUNT IN WORDS
         # --------------------------------
 
         words_patterns = [
-            r'Rupees\s+(.+?)\s+Only',
-            r'Indian\s+Rupees\s+(.+?)\s+Only'
+            r'(?:Indian\s+)?Rupees\s+(.+?)\s+Only'
         ]
 
         for pattern in words_patterns:
@@ -115,7 +138,7 @@ class OCREngine:
             words_match = re.search(
                 pattern,
                 text,
-                re.IGNORECASE
+                re.IGNORECASE | re.DOTALL
             )
 
             if words_match:
@@ -141,7 +164,6 @@ class OCREngine:
         )
 
         if upi:
-
             details["upi_id"] = upi.group()
 
         # --------------------------------
@@ -157,7 +179,6 @@ class OCREngine:
 
             r'\bUPI\s+Ref\s*[:#-]?\s*'
             r'([A-Z0-9]{8,30})'
-
         ]
 
         for pattern in transaction_patterns:
@@ -211,32 +232,44 @@ class OCREngine:
         # 6. DATE
         # --------------------------------
 
-        date_pattern = (
+        month_names = (
+            r'Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|'
+            r'Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|'
+            r'Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|'
+            r'Nov(?:ember)?|Dec(?:ember)?'
+        )
+
+        date_patterns = [
+
+            # Example: 30 Jun, 2026 or 30 Jun
             r'\b\d{1,2}\s+'
-            r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|'
-            r'Sep|Oct|Nov|Dec)[a-z]*'
-            r'\s*,?\s*\d{0,4}\b'
-            r'|'
+            + month_names
+            + r'(?:\s*,?\s+\d{4})?\b',
+
+            # Example: 30/06/2026 or 30-06-2026
             r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b'
-        )
+        ]
 
-        date = re.search(
-            date_pattern,
-            text,
-            re.IGNORECASE
-        )
+        for pattern in date_patterns:
 
-        if date:
+            date = re.search(
+                pattern,
+                text,
+                re.IGNORECASE
+            )
 
-            details["date"] = date.group().strip()
+            if date:
+
+                details["date"] = date.group().strip()
+                break
 
         # --------------------------------
         # 7. TIME
         # --------------------------------
 
         time_pattern = (
-            r'\b\d{1,2}:\d{2}'
-            r'(?::\d{2})?'
+            r'\b(?:0?[1-9]|1[0-2]):[0-5]\d'
+            r'(?::[0-5]\d)?'
             r'\s*(?:AM|PM)\b'
         )
 
