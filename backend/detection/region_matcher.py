@@ -176,7 +176,6 @@ class RegionMatcher:
             key=lambda item: item["overall_similarity"],
             reverse=True
         )
-
         grouped_results = {}
         for app in ReferenceMatcher.APPS:
 
