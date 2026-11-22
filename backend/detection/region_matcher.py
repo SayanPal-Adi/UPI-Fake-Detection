@@ -178,7 +178,6 @@ class RegionMatcher:
         )
 
         grouped_results = {}
-
         for app in ReferenceMatcher.APPS:
 
             grouped_results[app] = {}
